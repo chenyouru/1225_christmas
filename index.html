@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magical 3D Christmas Tree</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Times+New+Roman&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --gold: #d4af37;
+            --cream: #fceea7;
+            --black: #000000;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: var(--black);
+            font-family: 'Times New Roman', serif;
+            color: var(--gold);
+            user-select: none;
+        }
+
+        /* UI Overlay */
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 0.5s ease;
+        }
+
+        .ui-hidden {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        h1 {
+            font-family: 'Cinzel', serif;
+            font-size: 56px;
+            text-align: center;
+            margin-top: 40px;
+            background: linear-gradient(to bottom, #ffffff, var(--gold));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(212, 175, 55, 0.5);
+            letter-spacing: 4px;
+        }
+
+        /* Upload Controls */
+        .upload-wrapper {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            pointer-events: auto;
+        }
+
+        .custom-file-upload {
+            display: inline-block;
+            padding: 12px 30px;
+            border: 1px solid var(--gold);
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            color: var(--cream);
+            font-family: 'Cinzel', serif;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .custom-file-upload:hover {
+            background: rgba(212, 175, 55, 0.2);
+            box-shadow: 0 0 15px rgba(212, 175, 55, 0.4);
+        }
+
+        .hint-text {
+            margin-top: 10px;
+            font-size: 12px;
+            color: rgba(252, 238, 167, 0.6);
+            letter-spacing: 1px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* Loading Screen */
+        #loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--black);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+            transition: opacity 1s ease;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(212, 175, 55, 0.1);
+            border-top: 2px solid var(--gold);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        .loading-text {
+            font-family: 'Cinzel', serif;
+            color: var(--gold);
+            font-size: 14px;
+            letter-spacing: 4px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Hidden Webcam Container */
+        #webcam-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+
+    <!-- Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+            }
+        }
+    </script>
+</head>
+<body>
+    <audio id="bgm" loop preload="auto">
+      <source src="https://raw.githubusercontent.com/chenyouru/1225_christmas/main/audio/bgm.mp3" type="audio/mpeg">
+    </audio>
+
+    <!-- Loader -->
+    <div id="loader">
+        <div class="spinner"></div>
+        <div class="loading-text">LOADING HOLIDAY MAGIC</div>
+    </div>
+
+    <!-- UI Overlay -->
+    <div id="ui-container">
+        <h1>Merry Christmas</h1>
+        
+        <div class="upload-wrapper">
+            <label class="custom-file-upload">
+                <input type="file" id="imageUpload" accept="image/*" multiple>
+                Add More Memories
+            </label>
+            <div class="hint-text">Press 'H' to Hide Controls</div>
+        </div>
+    </div>
+
+    <!-- Hidden Webcam for CV Requirements -->
+    <div id="webcam-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="cv-output" width="160" height="120"></canvas>
+    </div>
+
+    <!-- Main Application Script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // --- Configuration & Constants ---
+        const CONFIG = {
+            colors: {
+                gold: 0xd4af37,
+                green: 0x0f3b1d,
+                red: 0x8a0303,
+                white: 0xffffff
+            },
+            particles: {
+                mainCount: 1500,
+                dustCount: 2500
+            },
+            // Defined Image URLs
+            predefinedImages: [
+            ]
+        };
+
+        // --- Interaction States ---
+        const STATE = {
+            TREE: 0,
+            SCATTERED: 1,
+            SHOWING_PHOTO: 2
+        };
+
+        // --- Utility: Procedural Candy Cane Texture ---
+        function createCandyCaneTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 128, 128);
+            
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 40;
+            ctx.beginPath();
+            // Diagonal stripes
+            for (let i = -128; i < 256; i += 60) {
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i + 128, 128);
+            }
+            ctx.stroke();
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 4);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            return texture;
+        }
+
+        // --- Class: ParticleManager (Manages all 3D entities) ---
+        class ParticleManager {
+            constructor(scene) {
+                this.scene = scene;
+                this.particles = [];
+                this.photos = [];
+                this.photoQueue = [];
+                this.currentPhotoIndex = -1;
+                this.currentActivePhoto = null;
+                
+                this.initGeometries();
+                this.loadPredefinedPhotos(); // Load the specific URLs
+            }
+
+            initGeometries() {
+                // Materials
+                const matGold = new THREE.MeshStandardMaterial({ color: CONFIG.colors.gold, roughness: 0.2, metalness: 0.9 });
+                const matGreen = new THREE.MeshStandardMaterial({ color: CONFIG.colors.green, roughness: 0.8 });
+                const matRed = new THREE.MeshPhysicalMaterial({ color: CONFIG.colors.red, roughness: 0.2, metalness: 0.1, clearcoat: 1.0 });
+                const matCane = new THREE.MeshStandardMaterial({ map: createCandyCaneTexture(), roughness: 0.4 });
+
+                // Geometries
+                const geoBox = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+                const geoSphere = new THREE.SphereGeometry(0.1, 16, 16);
+                
+                // Candy Cane Geometry (Tube)
+                const curve = new THREE.CatmullRomCurve3([
+                    new THREE.Vector3(0, 0, 0),
+                    new THREE.Vector3(0, 0.5, 0),
+                    new THREE.Vector3(0.1, 0.6, 0),
+                    new THREE.Vector3(0.2, 0.5, 0)
+                ]);
+                const geoCane = new THREE.TubeGeometry(curve, 20, 0.04, 8, false);
+
+                // Create Main Tree Particles
+                for (let i = 0; i < CONFIG.particles.mainCount; i++) {
+                    let mesh;
+                    const r = Math.random();
+                    
+                    if (r < 0.6) {
+                        mesh = new THREE.Mesh(geoBox, Math.random() > 0.5 ? matGreen : matGold);
+                    } else if (r < 0.9) {
+                        mesh = new THREE.Mesh(geoSphere, Math.random() > 0.5 ? matRed : matGold);
+                    } else {
+                        mesh = new THREE.Mesh(geoCane, matCane);
+                        mesh.scale.setScalar(0.5);
+                    }
+
+                    // Calculate Tree Position (Spiral Cone)
+                    const theta = Math.random() * Math.PI * 2 * 10; 
+                    const y = Math.random() * 10; 
+                    const radius = (10 - y) * 0.4 * Math.random(); 
+                    const x = radius * Math.cos(theta);
+                    const z = radius * Math.sin(theta);
+                    
+                    const targetTree = new THREE.Vector3(x, y - 5, z); 
+                    const targetScatter = new THREE.Vector3((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30);
+                    
+                    mesh.position.copy(targetTree);
+                    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+                    
+                    mesh.userData = {
+                        targetTree: targetTree,
+                        targetScatter: targetScatter,
+                    };
+
+                    this.scene.add(mesh);
+                    this.particles.push(mesh);
+                }
+
+                // Add Dust
+                const dustGeo = new THREE.BufferGeometry();
+                const dustPos = [];
+                for(let i=0; i<CONFIG.particles.dustCount; i++) {
+                    dustPos.push((Math.random()-0.5)*40, (Math.random()-0.5)*40, (Math.random()-0.5)*40);
+                }
+                dustGeo.setAttribute('position', new THREE.Float32BufferAttribute(dustPos, 3));
+                const dustMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0.6 });
+                this.dustSystem = new THREE.Points(dustGeo, dustMat);
+                this.scene.add(this.dustSystem);
+            }
+
+            loadPredefinedPhotos() {
+                const loader = new THREE.TextureLoader();
+                loader.setCrossOrigin('anonymous'); 
+
+                CONFIG.predefinedImages.forEach(url => {
+                    loader.load(
+                        url, 
+                        (texture) => {
+                            texture.colorSpace = THREE.SRGBColorSpace;
+                            this.addPhotoToScene(texture);
+                        },
+                        undefined,
+                        (err) => {
+                            console.warn("Could not load image:", url, err);
+                        }
+                    );
+                });
+            }
+
+            addPhotoToScene(texture) {
+                // Frame
+                const frameGeo = new THREE.BoxGeometry(3.2, 3.2, 0.1);
+                const frameMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.gold, roughness: 0.1, metalness: 1.0 });
+                const frame = new THREE.Mesh(frameGeo, frameMat);
+
+                // Photo Plane
+                const planeGeo = new THREE.PlaneGeometry(6, 5);
+                const planeMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                const photoMesh = new THREE.Mesh(planeGeo, planeMat);
+                photoMesh.position.z = 0.06;
+                frame.add(photoMesh);
+
+                // Initial hidden state (hidden in the scattered void)
+                frame.position.set((Math.random()-0.5)*50, (Math.random()-0.5)*50, (Math.random()-0.5)*50);
+                frame.visible = false;
+
+                frame.userData = {
+                    isPhoto: true,
+                    targetScatter: frame.position.clone()
+                };
+
+                this.scene.add(frame);
+                this.photos.push(frame);
+                this.photoQueue.push(frame);
+            }
+
+            resetPhotoQueue() {
+                this.photoQueue = [...this.photos];
+            }
+
+            update(dt, currentState, time) {
+                // Dust animation
+                this.dustSystem.rotation.y = time * 0.05;
+
+                // Move particles based on state
+                this.particles.forEach(p => {
+                    let target;
+                    if (currentState === STATE.TREE) {
+                        target = p.userData.targetTree;
+                    } else {
+                        // In SCATTERED and SHOWING_PHOTO, particles drift in background
+                        target = p.userData.targetScatter;
+                    }
+
+                    // Soft LERP movement
+                    p.position.lerp(target, dt * 2.5);
+                    p.rotation.x += dt * 0.5;
+                    p.rotation.y += dt * 0.5;
+                });
+
+                // Update Photos
+                this.photos.forEach(photo => {
+                    if (currentState === STATE.SHOWING_PHOTO && photo === this.currentActivePhoto) {
+                        photo.visible = true;
+                        // Move to front center
+                        const targetPos = new THREE.Vector3(0, 0, 10);
+                        photo.position.lerp(targetPos, dt * 3);
+                        photo.lookAt(this.scene.getObjectByName("camera")?.position || new THREE.Vector3(0,2,50));
+                        photo.rotation.set(0, 0, 0); 
+                    } else {
+                        // Hide or scatter
+                        if (currentState === STATE.TREE) {
+                             photo.visible = false;
+                        } else {
+                            // When scattered or when not the active photo
+                            photo.position.lerp(photo.userData.targetScatter, dt);
+                            // Optional: Make non-active photos invisible to avoid clutter
+                            if (currentState === STATE.SHOWING_PHOTO) {
+                                // Keep invisible if not active, or fade out
+                                // Here we just keep them far away/scattered
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // --- Main Application Class ---
+        class App {
+            constructor() {
+                this.currentState = STATE.TREE;
+                this.isDragging = false;
+                this.mouseDownTime = 0;
+                this.mouseDownPos = new THREE.Vector2();
+
+                this.initThree();
+                this.initLighting();
+                this.initContent();
+                this.initEvents();
+                this.loop();
+
+                // Hide loader
+                setTimeout(() => {
+                    document.getElementById('loader').style.opacity = '0';
+                    setTimeout(() => document.getElementById('loader').remove(), 1000);
+                }, 2000);
+            }
+
+            initThree() {
+                // Renderer
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.toneMapping = THREE.ReinhardToneMapping;
+                this.renderer.toneMappingExposure = 2.2;
+                document.body.appendChild(this.renderer.domElement);
+
+                // Scene
+                this.scene = new THREE.Scene();
+
+                // Camera
+                this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.camera.position.set(0, 2, 50);
+                this.camera.name = "camera";
+
+                // Environment
+                const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+                this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+                // Controls
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+                this.controls.autoRotate = true;
+                this.controls.autoRotateSpeed = 0.5;
+
+                // Post Processing
+                this.composer = new EffectComposer(this.renderer);
+                const renderPass = new RenderPass(this.scene, this.camera);
+                this.composer.addPass(renderPass);
+
+                const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+                bloomPass.strength = 0.45;
+                bloomPass.radius = 0.4;
+                bloomPass.threshold = 0.7;
+                this.composer.addPass(bloomPass);
+                
+                const outputPass = new OutputPass();
+                this.composer.addPass(outputPass);
+            }
+
+            initLighting() {
+                const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambient);
+
+                const point = new THREE.PointLight(0xffa500, 2, 20);
+                point.position.set(0, 0, 0);
+                this.scene.add(point);
+
+                const spotGold = new THREE.SpotLight(CONFIG.colors.gold, 1200);
+                spotGold.position.set(30, 40, 40);
+                spotGold.angle = Math.PI / 6;
+                spotGold.penumbra = 1;
+                this.scene.add(spotGold);
+
+                const spotBlue = new THREE.SpotLight(0x0000ff, 600);
+                spotBlue.position.set(-30, 20, -30);
+                spotBlue.angle = Math.PI / 6;
+                this.scene.add(spotBlue);
+            }
+
+            initContent() {
+                this.particleManager = new ParticleManager(this.scene);
+            }
+
+            initEvents() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                    this.composer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                // Interaction Logic
+                const canvas = this.renderer.domElement;
+                
+                canvas.addEventListener('pointerdown', (e) => {
+                    this.mouseDownTime = performance.now();
+                    this.mouseDownPos.set(e.clientX, e.clientY);
+                    this.isDragging = false;
+                    this.controls.autoRotate = false; 
+                });
+
+                canvas.addEventListener('pointermove', (e) => {
+                    if (new THREE.Vector2(e.clientX, e.clientY).distanceTo(this.mouseDownPos) > 5) {
+                        this.isDragging = true;
+                    }
+		     // 🔊 背景音樂（只啟動一次）
+    		     const bgm = document.getElementById('bgm');
+       		     if (bgm && bgm.paused) {
+           		     bgm.volume = 0.8; // 可自行調整
+           		     bgm.play().catch(() => {});
+       		     }
+
+       		     this.mouseDownTime = performance.now();
+       		     this.mouseDownPos.set(e.clientX, e.clientY);
+       		     this.isDragging = false;
+       		     this.controls.autoRotate = false;
+                });
+
+                canvas.addEventListener('pointerup', (e) => {
+                    const timeDiff = performance.now() - this.mouseDownTime;
+                    
+                    if (timeDiff < 250 && !this.isDragging) {
+                        this.handleInteraction();
+                    } 
+                    this.controls.autoRotate = true;
+                });
+
+                // UI Toggle
+                window.addEventListener('keydown', (e) => {
+                    if (e.key.toLowerCase() === 'h') {
+                        document.getElementById('ui-container').classList.toggle('ui-hidden');
+                    }
+                });
+
+                // File Upload Logic
+                const fileInput = document.getElementById('imageUpload');
+                fileInput.addEventListener('change', (e) => {
+                    const files = e.target.files;
+                    if (!files.length) return;
+
+                    Array.from(files).forEach(f => {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            new THREE.TextureLoader().load(ev.target.result, (t) => {
+                                t.colorSpace = THREE.SRGBColorSpace;
+                                this.particleManager.addPhotoToScene(t);
+                            });
+                        };
+                        reader.readAsDataURL(f);
+                    });
+                });
+            }
+
+            handleInteraction() {
+                switch (this.currentState) {
+                    case STATE.TREE:
+                        // 1. Click Tree -> Scatter
+                        this.currentState = STATE.SCATTERED;
+                        break;
+
+                    case STATE.SCATTERED:
+                    case STATE.SHOWING_PHOTO:
+                        // 2. Click Scattered -> Show Photo
+                        // 3. Click Photo -> Next Photo
+                        
+                        // Ensure queue is populated if empty and we are starting/continuing
+                        if (this.currentState === STATE.SCATTERED) {
+                            if (this.particleManager.photos.length > 0) {
+                                this.particleManager.resetPhotoQueue();
+                            }
+                        }
+
+                        if (this.particleManager.photoQueue.length > 0) {
+                            // Pick random photo
+                            const idx = Math.floor(Math.random() * this.particleManager.photoQueue.length);
+                            this.particleManager.currentActivePhoto = this.particleManager.photoQueue[idx];
+                            // Remove from queue
+                            this.particleManager.photoQueue.splice(idx, 1);
+                            
+                            this.currentState = STATE.SHOWING_PHOTO;
+                        } else {
+                            // No more photos -> Reset to Tree
+                            this.particleManager.resetPhotoQueue();
+                            this.currentState = STATE.TREE;
+                        }
+                        break;
+                }
+            }
+
+            loop() {
+                requestAnimationFrame(() => this.loop());
+                
+                const time = performance.now() * 0.001;
+                const dt = 0.016; 
+
+                this.controls.update();
+                this.particleManager.update(dt, this.currentState, time);
+                
+                this.composer.render();
+            }
+        }
+
+        // Start App
+        new App();
+    </script>
+</body>
+</html>
